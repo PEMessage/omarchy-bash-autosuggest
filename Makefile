@@ -11,16 +11,24 @@ CFLAGS += -std=c11 -fPIC -Wall -Wextra
 LDFLAGS += -shared
 LDLIBS += -lreadline
 
-.PHONY: all clean check test
+.PHONY: all clean check rebuild test
 
 all: $(MODULE)
 
 $(MODULE): src/omarchy_autosuggest.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
-	strip --strip-unneeded $@
+	@set -e; \
+	tmp="$@.tmp"; \
+	trap 'rm -f -- "$$tmp"' EXIT HUP INT TERM; \
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o "$$tmp" $< $(LDLIBS); \
+	strip --strip-unneeded "$$tmp"; \
+	mv -f -- "$$tmp" $@; \
+	trap - EXIT HUP INT TERM
 
 $(BUILD_DIR):
 	mkdir -p $@
+
+rebuild:
+	$(MAKE) --no-print-directory --always-make all
 
 check:
 	$(CC) $(CPPFLAGS) -std=c11 -Wall -Wextra -fanalyzer -fsyntax-only src/omarchy_autosuggest.c
@@ -31,4 +39,4 @@ test: all
 	bash tests/smoke.sh
 
 clean:
-	rm -f $(MODULE)
+	rm -f $(MODULE) $(MODULE).tmp

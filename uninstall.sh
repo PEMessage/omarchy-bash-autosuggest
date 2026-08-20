@@ -19,7 +19,7 @@ if (( EUID == 0 )); then
 fi
 
 if [[ -f $BASHRC ]] && grep -Fqx "$START_MARKER" "$BASHRC"; then
-  backup_path="$BASHRC.bak.$(date +%Y%m%d%H%M%S)"
+  backup_path="$BASHRC.bak.$(date +%Y%m%d%H%M%S%N)"
   temp_path="$(mktemp "$BASHRC.tmp.XXXXXX")"
   cp -p "$BASHRC" "$backup_path"
   awk -v start="$START_MARKER" -v end="$END_MARKER" '

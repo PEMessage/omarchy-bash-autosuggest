@@ -16,7 +16,7 @@ if [[ ! -r $_oba_module ||
 fi
 
 if [[ $_oba_needs_build ]]; then
-  if ! make --silent -C "$_oba_root" clean all; then
+  if ! make --silent -C "$_oba_root" rebuild; then
     printf 'omarchy-bash-autosuggest: rebuild failed; suggestions are disabled\n' >&2
     unset _oba_root _oba_module _oba_needs_build
     return 0
@@ -27,7 +27,7 @@ if ! type omarchy_autosuggest &>/dev/null; then
   if ! enable -f "$_oba_module" omarchy_autosuggest 2>/dev/null; then
     # A stale module can survive an unusual package replacement with preserved
     # mtimes. Rebuild once before giving up.
-    if ! make --silent -C "$_oba_root" clean all ||
+    if ! make --silent -C "$_oba_root" rebuild ||
        ! enable -f "$_oba_module" omarchy_autosuggest 2>/dev/null; then
       printf 'omarchy-bash-autosuggest: module load failed; suggestions are disabled\n' >&2
       unset _oba_root _oba_module _oba_needs_build

@@ -25,7 +25,7 @@ if (( EUID == 0 )); then
   die "run the installer as your regular Omarchy user, not as root"
 fi
 
-for command_name in bash cc git install make mktemp; do
+for command_name in bash cc git install make mktemp strip; do
   require_command "$command_name"
 done
 
@@ -61,7 +61,7 @@ else
   git clone --quiet --depth 1 --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR"
 fi
 
-make --silent -C "$INSTALL_DIR" clean all
+make --silent -C "$INSTALL_DIR" rebuild
 [[ -r $INSTALL_DIR/build/omarchy_autosuggest.so ]] || die "the module was not built"
 
 mkdir -p "$(dirname "$BASHRC")"
@@ -70,7 +70,7 @@ touch "$BASHRC"
 if grep -Fqx "$START_MARKER" "$BASHRC"; then
   grep -Fqx "$END_MARKER" "$BASHRC" || die "the Bash configuration block is incomplete: $BASHRC"
 else
-  backup_path="$BASHRC.bak.$(date +%Y%m%d%H%M%S)"
+  backup_path="$BASHRC.bak.$(date +%Y%m%d%H%M%S%N)"
   cp -p "$BASHRC" "$backup_path"
   {
     printf '\n%s\n' "$START_MARKER"
