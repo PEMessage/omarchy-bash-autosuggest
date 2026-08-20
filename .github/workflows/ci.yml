@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm base-devel bash git readline shellcheck
+      - name: Static checks
+        run: make check
+      - name: Build and test
+        run: make test
