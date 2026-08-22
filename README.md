@@ -1,16 +1,22 @@
 # Omarchy Bash Autosuggest
 
-Fast, Fish-style history suggestions for Bash, tuned for Omarchy 4.
+Fast, Fish-like history suggestions and command-line motion for Bash, tuned
+for Omarchy 4.
 
 [![CI](https://github.com/cyppe/omarchy-bash-autosuggest/actions/workflows/ci.yml/badge.svg)](https://github.com/cyppe/omarchy-bash-autosuggest/actions/workflows/ci.yml)
 
 Type the beginning of a command and the newest matching history entry appears
-as dim text. Accept as much as you want, keep typing to refine it, or press
-Enter to run only the text you explicitly accepted.
+as a faint italic suffix. Accept all or part of it, keep typing to refine it,
+or dismiss it without changing the command you typed.
 
-This is a Bash extension, not an Omarchy Shell/Quickshell plugin. It works with
-Omarchy's existing Starship prompt, Tab completion, prefix-aware arrow keys,
-and `fzf` history search.
+```text
+$ git c▏heckout main
+       └─ faint suggestion; Right accepts it
+```
+
+This is a small Bash/Readline extension, not a replacement shell or an
+Omarchy Shell/Quickshell plugin. It keeps Omarchy's Starship prompt, Tab
+completion, `fzf` history search, terminal theme, and Bash history file.
 
 ## Install on Omarchy 4
 
@@ -20,15 +26,17 @@ Run this in a terminal:
 curl -fsSL https://raw.githubusercontent.com/cyppe/omarchy-bash-autosuggest/main/install.sh | bash && exec bash
 ```
 
-That is the complete installation. It does not use sudo and does not install
-system packages on a standard Omarchy 4 setup.
-
 The installer:
 
-1. Clones the project to `~/.local/share/omarchy-bash-autosuggest`.
-2. Builds a small Bash/Readline module locally.
-3. Backs up `~/.bashrc`.
-4. Appends one clearly marked loader block to `~/.bashrc`.
+1. Checks the small build dependency set with Omarchy's package helper.
+2. Clones the project to `~/.local/share/omarchy-bash-autosuggest`.
+3. Compiles and load-checks the module against the local Bash and Readline.
+4. Backs up `~/.bashrc`.
+5. Appends one clearly marked loader block to `~/.bashrc`.
+
+Dependencies already included with a normal Omarchy installation are left
+alone. If any are missing, Omarchy may ask for sudo permission to install
+them. The extension itself is installed entirely in your home directory.
 
 If you prefer to inspect the installer first:
 
@@ -40,67 +48,107 @@ less install.sh
 exec bash
 ```
 
-## Controls
+## Everyday controls
+
+Suggestion acceptance is deliberately simple:
+
+| Key | With a suggestion visible |
+| --- | --- |
+| Keep typing | Refine or replace the suggestion |
+| Right Arrow or Ctrl-F | Accept the complete suggestion |
+| Alt-F or Alt-Right | Accept through the next Readline word |
+| Ctrl-Right | Accept through the next Bash shell word/token |
+| End or Ctrl-E | Accept the complete suggestion |
+| Ctrl-G | Hide this suggestion until the typed line changes |
+| Enter | Execute only text that was typed or explicitly accepted |
+| Any other edit or motion | Remove the ghost suffix, then perform its normal action |
+
+When no suggestion is visible, these keys retain their ordinary Readline
+meaning.
+
+### History
 
 | Key | Action |
 | --- | --- |
-| Keep typing | Refine or ignore the current suggestion |
-| Right Arrow or Ctrl-F | Accept one character |
-| Alt-F | Accept through the next word |
-| End or Ctrl-E | Accept the complete suggestion |
-| Enter | Execute only typed and accepted text |
-| Backspace, Ctrl-W, Tab, cursor movement | Discard the unaccepted suffix, then perform the normal action |
+| Up or Ctrl-P | Search backward using the text already typed as a prefix |
+| Down or Ctrl-N | Search forward using the same prefix |
+| Up on an empty line | Walk through all history, newest first |
+| Down past the newest match | Restore the line present before navigation |
+| Ctrl-R | Open Omarchy's full interactive `fzf` history search |
 
-Existing Omarchy controls remain available:
+Both common terminal encodings for Up and Down are bound, so the behavior is
+consistent in a regular terminal and inside tmux. Recalled history is shown as
+plain command text rather than immediately growing a second ghost suggestion.
 
-- Up and Down search history using the prefix already typed.
-- Ctrl-R opens Omarchy's full `fzf` history search.
-- Tab and Shift-Tab retain Omarchy's completion behavior.
+The loader adds `erasedups` to the user's existing `HISTCONTROL`. On Omarchy,
+whose default is `ignoreboth`, the result is `ignoreboth:erasedups`: leading-
+space commands and adjacent duplicates remain ignored, and saving a repeated
+command removes its older copies.
 
-## Design goals
+### Motion and completion
 
-- No daemon or background process.
-- No separate history database.
-- No network access after installation.
-- No subprocesses while typing.
-- No changes to Omarchy's packaged files under `/usr/share/omarchy`.
-- Bounded work: only the newest 8,192 history entries are considered by
-  default.
-- Safe fallback: if the module cannot load, Bash continues normally.
+| Key | Action |
+| --- | --- |
+| Alt-F or Alt-Right | Move forward by a Readline word |
+| Alt-B or Alt-Left | Move backward by a Readline word |
+| Ctrl-Right | Move forward by a shell-aware word |
+| Ctrl-Left | Move backward by a shell-aware word |
+| Tab / Shift-Tab | Cycle completion candidates forward / backward |
 
-The compiled module is typically under 20 KB. Loading and enabling it is below
-the millisecond resolution of Bash's built-in timer on the reference Omarchy 4
-system.
+Readline words are useful for small movements within punctuation. Shell words
+follow Bash token boundaries, so quoted and escaped arguments move more like
+the shell parses them. Tab completion remains Omarchy's menu completion; the
+extension fixes its internal repeat state so repeated Tab presses keep cycling.
 
-## How it behaves
+Other repeat-sensitive Readline commands—including `yank-pop` and repeated
+`yank-last-arg`—also retain their normal behavior.
+
+## Visual behavior
+
+Ghost text is faint and italic but has no hard-coded foreground color, so it
+inherits the active Omarchy terminal theme. Completion prefixes use the
+theme's configured completion color. The audible/visual Readline bell is
+disabled for a calmer prompt.
+
+The styling is implemented with Readline's active region and restored whenever
+no suggestion is present or the extension is disabled.
+
+## How suggestions are selected
 
 Suggestions are:
 
 - read directly from Bash's in-memory history;
 - matched case-sensitively against the complete text before the cursor;
 - selected newest-first;
-- displayed only while the cursor is at the end of the command;
-- omitted for multiline history entries.
+- displayed only when the cursor is at the end of a non-empty command;
+- hidden while browsing history;
+- omitted for multiline history entries;
+- bounded to the newest 8,192 history entries by default.
 
-The dim suffix is temporarily held in Readline's active region. Before normal
-editing or command execution, the extension removes every character that was
-not explicitly accepted. This is why Enter cannot accidentally execute the
-ghost text.
+Before normal editing or command execution, the extension removes every
+character that was not explicitly accepted. Enter therefore cannot
+accidentally execute ghost text.
 
 ## Configuration
 
-The default history scan limit is 8,192 entries. To change it for future
-shells, put this before the installer block in `~/.bashrc`:
+Put configuration before the installer block in `~/.bashrc`.
+
+Change the bounded history scan:
 
 ```bash
 export OMARCHY_AUTOSUGGEST_HISTORY_LIMIT=4096
 ```
 
-For the current shell, use the builtin directly:
+Keep the suggestions but opt out of the additional history, bell, completion,
+arrow, and Ctrl-arrow tuning:
 
 ```bash
-omarchy_autosuggest limit 4096
+export OMARCHY_AUTOSUGGEST_TUNE_READLINE=0
 ```
+
+This is useful when you maintain all Readline bindings yourself. Load the
+extension after those bindings. If another tool changes bindings later, run
+`omarchy_autosuggest refresh` so the extension can wrap the new final map.
 
 Available maintenance commands:
 
@@ -113,8 +161,27 @@ omarchy_autosuggest refresh
 omarchy_autosuggest limit 8192
 ```
 
-`refresh` is useful if another Bash extension changes Readline bindings after
-this extension has loaded.
+`limit` changes the current shell only; the environment variable applies to
+future shells.
+
+## Design and safety
+
+- No daemon or background process.
+- No separate history database.
+- No network access after installation.
+- No subprocess or script on each key press.
+- No changes under `/usr/share/omarchy`.
+- No hard-coded terminal color.
+- Bounded history scanning.
+- Safe fallback: if a rebuild or load fails, Bash continues without suggestions.
+
+The module interposes on Readline commands in-process. It preserves the real
+previous Readline function while dispatching, which is what allows history
+search, menu completion, yank-pop, and other repeated motions to continue
+across consecutive key presses.
+
+The compiled module is typically under 20 KB. It is built locally because
+Bash loadable modules must match the installed Bash and Readline ABI.
 
 ## Update
 
@@ -124,9 +191,9 @@ Run the installation command again:
 curl -fsSL https://raw.githubusercontent.com/cyppe/omarchy-bash-autosuggest/main/install.sh | bash && exec bash
 ```
 
-The installer performs a fast-forward update and rebuilds the module. The
-loader also rebuilds automatically when Bash, Readline, the C source, or the
-Makefile is newer than the installed module.
+The installer performs a fast-forward update, rebuilds, and load-checks the
+module. The shell loader also rebuilds automatically when Bash, Readline, the
+C source, or the Makefile is newer than the installed module.
 
 ## Uninstall
 
@@ -139,10 +206,9 @@ and deletes the project checkout. It does not touch Bash history.
 
 ## Dotfile managers and custom layouts
 
-The automatic installer is designed for regular, unmanaged Omarchy 4 dotfiles.
-If your `.bashrc` is generated by chezmoi, yadm, or another manager, clone and
-build the project, then manage this loader yourself near the end of the
-interactive section:
+The automatic installer is designed for regular, unmanaged Omarchy dotfiles.
+If `.bashrc` is generated by chezmoi, yadm, or another manager, clone and build
+the project, then manage this loader near the end of the interactive section:
 
 ```bash
 _oba_data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -152,19 +218,18 @@ fi
 unset _oba_data_home
 ```
 
-It should be loaded after Omarchy's default Bash configuration so it can wrap
-the final Readline, completion, and `fzf` bindings.
+Load it after Omarchy's default Bash configuration and any personal Readline,
+completion, or `fzf` bindings.
 
 ## Compatibility
 
 The supported target is Omarchy 4 or newer with Bash 5 and Readline 8. The
 installer can run on another Bash-based distribution when the Bash and
-Readline development headers are available, but Omarchy is the tested and
-supported environment.
+Readline development headers are already available, but Omarchy is the tested
+and supported environment.
 
-The extension uses public Readline APIs plus Bash's supported loadable-builtin
-interface. Because it is compiled against the local system, there is no
-prebuilt binary or architecture-specific download.
+Both Emacs and vi Readline keymaps are wrapped by the C module. The documented
+shortcuts follow Omarchy's default Emacs-style setup.
 
 ## Development
 
@@ -173,8 +238,12 @@ make check
 make test
 ```
 
-`make check` runs compiler analysis, Bash syntax validation, and ShellCheck.
-`make test` builds the module and exercises its control builtin.
+`make check` runs GCC's static analyzer, Bash syntax validation, and ShellCheck.
+`make test` builds the module, verifies its control commands, then drives a real
+interactive Bash through a pseudo-terminal. The regression suite covers
+repeated history traversal, restoring the original line, Tab cycling,
+`yank-pop`, repeated last-argument recall, suggestion acceptance, Ctrl-G
+dismissal, and history/suggestion separation.
 
 ## License
 

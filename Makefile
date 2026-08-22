@@ -1,5 +1,6 @@
 CC ?= cc
-VERSION := 0.1.0
+PYTHON ?= python
+VERSION := 0.2.0
 BUILD_DIR := build
 MODULE := $(BUILD_DIR)/omarchy_autosuggest.so
 
@@ -32,11 +33,13 @@ rebuild:
 
 check:
 	$(CC) $(CPPFLAGS) -std=c11 -Wall -Wextra -fanalyzer -fsyntax-only src/omarchy_autosuggest.c
-	bash -n install.sh uninstall.sh shell/init.bash tests/smoke.sh
-	shellcheck -s bash install.sh uninstall.sh shell/init.bash tests/smoke.sh
+	bash -n install.sh uninstall.sh shell/init.bash tests/loader.sh tests/smoke.sh
+	shellcheck -s bash install.sh uninstall.sh shell/init.bash tests/loader.sh tests/smoke.sh
 
 test: all
 	bash tests/smoke.sh
+	bash tests/loader.sh
+	$(PYTHON) tests/interactive.py $(MODULE)
 
 clean:
 	rm -f $(MODULE) $(MODULE).tmp

@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install build dependencies
-        run: pacman -Syu --noconfirm base-devel bash git readline shellcheck
+        run: pacman -Syu --noconfirm base-devel bash git python readline shellcheck
       - name: Static checks
         run: make check
       - name: Build and test

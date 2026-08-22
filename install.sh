@@ -25,19 +25,24 @@ if (( EUID == 0 )); then
   die "run the installer as your regular Omarchy user, not as root"
 fi
 
-for command_name in bash cc git install make mktemp strip; do
-  require_command "$command_name"
-done
-
 if command -v omarchy &>/dev/null; then
   omarchy_version="$(omarchy version 2>/dev/null || true)"
   omarchy_major="${omarchy_version%%.*}"
   if [[ $omarchy_major =~ ^[0-9]+$ ]] && (( omarchy_major < 4 )); then
     die "Omarchy 4 or newer is required (found $omarchy_version)"
   fi
+
+  if command -v omarchy-pkg-add &>/dev/null; then
+    printf 'Checking build dependencies...\n'
+    omarchy-pkg-add base-devel bash git readline
+  fi
 else
   printf 'omarchy-bash-autosuggest: Omarchy was not detected; continuing with generic Bash support\n' >&2
 fi
+
+for command_name in bash cc git install make mktemp strip; do
+  require_command "$command_name"
+done
 
 (( BASH_VERSINFO[0] >= 5 )) || die "Bash 5 or newer is required"
 [[ -r /usr/include/bash/builtins.h ]] ||
@@ -64,6 +69,13 @@ fi
 make --silent -C "$INSTALL_DIR" rebuild
 [[ -r $INSTALL_DIR/build/omarchy_autosuggest.so ]] || die "the module was not built"
 
+installed_version="$(
+  bash --noprofile --norc -c '
+    enable -f "$1" omarchy_autosuggest
+    omarchy_autosuggest version
+  ' bash "$INSTALL_DIR/build/omarchy_autosuggest.so"
+)" || die "the built module could not be loaded"
+
 mkdir -p "$(dirname "$BASHRC")"
 touch "$BASHRC"
 
@@ -84,4 +96,5 @@ else
   printf 'Backed up %s to %s\n' "$BASHRC" "$backup_path"
 fi
 
-printf '\nInstalled %s. Open a new terminal to start using it.\n' "$PROJECT_NAME"
+printf '\nInstalled %s v%s. Open a new terminal to start using it.\n' \
+  "$PROJECT_NAME" "$installed_version"

@@ -49,16 +49,32 @@ static int suggestion_start;
 static int saved_mark;
 static int saved_mark_active;
 static int style_active;
+static int history_navigation_active;
 static int history_scan_limit = 8192;
 
 static char *old_region_start;
 static char *old_region_end;
 static char *old_region_enabled;
+static char *dismissed_line;
+static char *history_navigation_line;
 
+static rl_command_func_t *last_original;
+
+static rl_command_func_t *fn_abort;
+static rl_command_func_t *fn_beginning_of_history;
+static rl_command_func_t *fn_digit_argument;
+static rl_command_func_t *fn_end_of_history;
 static rl_command_func_t *fn_forward_char;
 static rl_command_func_t *fn_forward_word;
+static rl_command_func_t *fn_history_search_backward;
+static rl_command_func_t *fn_history_search_forward;
+static rl_command_func_t *fn_history_substring_search_backward;
+static rl_command_func_t *fn_history_substring_search_forward;
+static rl_command_func_t *fn_next_history;
+static rl_command_func_t *fn_previous_history;
 static rl_command_func_t *fn_shell_forward_word;
 static rl_command_func_t *fn_end_of_line;
+static rl_command_func_t *fn_vi_arg_digit;
 
 static int autosuggest_dispatch(int count, int key);
 
@@ -179,8 +195,8 @@ static void use_suggestion_style(void) {
   if (style_active)
     return;
   rl_variable_bind("enable-active-region", "on");
-  rl_variable_bind("active-region-start-color", "\033[2m");
-  rl_variable_bind("active-region-end-color", "\033[22m");
+  rl_variable_bind("active-region-start-color", "\033[2;3m");
+  rl_variable_bind("active-region-end-color", "\033[22;23m");
   style_active = 1;
 }
 
@@ -204,6 +220,45 @@ static void free_region_style(void) {
   old_region_start = NULL;
   old_region_end = NULL;
   old_region_enabled = NULL;
+}
+
+static void clear_dismissed_line(void) {
+  free(dismissed_line);
+  dismissed_line = NULL;
+}
+
+static void dismiss_current_line(void) {
+  clear_dismissed_line();
+  dismissed_line = copy_string(rl_line_buffer);
+}
+
+static int current_line_is_dismissed(void) {
+  if (dismissed_line == NULL || rl_line_buffer == NULL)
+    return 0;
+  if (strcmp(dismissed_line, rl_line_buffer) == 0)
+    return 1;
+  clear_dismissed_line();
+  return 0;
+}
+
+static void clear_history_navigation(void) {
+  history_navigation_active = 0;
+  free(history_navigation_line);
+  history_navigation_line = NULL;
+}
+
+static void remember_history_navigation(void) {
+  clear_history_navigation();
+  history_navigation_line = copy_string(rl_line_buffer);
+  history_navigation_active = 1;
+}
+
+static void finish_non_history_command(void) {
+  if (!history_navigation_active)
+    return;
+  if (history_navigation_line == NULL || rl_line_buffer == NULL ||
+      strcmp(history_navigation_line, rl_line_buffer) != 0)
+    clear_history_navigation();
 }
 
 static void strip_suggestion(void) {
@@ -260,8 +315,9 @@ static int refresh_suggestion(void) {
   int old_mark;
   int old_active;
 
-  if (!plugin_enabled || rl_done || rl_line_buffer == NULL ||
-      rl_point != rl_end || rl_end <= 0) {
+  if (!plugin_enabled || rl_done || history_navigation_active ||
+      rl_line_buffer == NULL || rl_point != rl_end || rl_end <= 0 ||
+      current_line_is_dismissed()) {
     restore_region_style();
     return 0;
   }
@@ -289,8 +345,45 @@ static int refresh_suggestion(void) {
   return 1;
 }
 
+static int original_preserves_last_function(rl_command_func_t *original) {
+  return original == fn_digit_argument || original == fn_vi_arg_digit;
+}
+
+static int call_original(rl_command_func_t *original, int count, int key) {
+  int result;
+
+  /* Readline records the wrapper as rl_last_func after each dispatch. Restore
+   * the semantic command before calling through so repeat-sensitive commands
+   * such as history search, menu completion, and yank-pop keep their state. */
+  if (rl_last_func != autosuggest_dispatch)
+    last_original = rl_last_func;
+  rl_last_func = last_original;
+  result = original(count, key);
+  if (rl_pending_input == 0 && !original_preserves_last_function(original))
+    last_original = original;
+  return result;
+}
+
+static void record_original(rl_command_func_t *original) {
+  if (rl_last_func != autosuggest_dispatch)
+    last_original = rl_last_func;
+  rl_last_func = last_original;
+  if (!original_preserves_last_function(original))
+    last_original = original;
+}
+
+static int is_history_navigation(rl_command_func_t *original) {
+  return original == fn_beginning_of_history ||
+         original == fn_end_of_history ||
+         original == fn_history_search_backward ||
+         original == fn_history_search_forward ||
+         original == fn_history_substring_search_backward ||
+         original == fn_history_substring_search_forward ||
+         original == fn_next_history || original == fn_previous_history;
+}
+
 static int accept_forward(rl_command_func_t *original, int count, int key) {
-  int result = original(count, key);
+  int result = call_original(original, count, key);
 
   if (rl_point >= rl_end) {
     suggestion_active = 0;
@@ -307,8 +400,18 @@ static int accept_forward(rl_command_func_t *original, int count, int key) {
   return result;
 }
 
+static int accept_all(rl_command_func_t *original) {
+  record_original(original);
+  rl_point = rl_end;
+  suggestion_active = 0;
+  rl_mark = rl_point;
+  rl_deactivate_mark();
+  restore_region_style();
+  return 0;
+}
+
 static int accept_to_end(rl_command_func_t *original, int count, int key) {
-  int result = original(count, key);
+  int result = call_original(original, count, key);
 
   suggestion_active = 0;
   rl_mark = rl_point;
@@ -321,6 +424,8 @@ static int autosuggest_dispatch(int count, int key) {
   Keymap map = rl_executing_keymap != NULL ? rl_executing_keymap
                                            : rl_binding_keymap;
   rl_command_func_t *original = find_original(map, rl_executing_key);
+  int navigating_history;
+  int dismissing;
   int result;
 
   if (original == NULL && map != rl_binding_keymap)
@@ -328,18 +433,33 @@ static int autosuggest_dispatch(int count, int key) {
   if (original == NULL)
     return 0;
 
+  if (suggestion_active && count > 0 && original == fn_forward_char)
+    return accept_all(original);
   if (suggestion_active && count > 0 &&
-      (original == fn_forward_char || original == fn_forward_word ||
-       original == fn_shell_forward_word))
+      (original == fn_forward_word || original == fn_shell_forward_word))
     return accept_forward(original, count, key);
   if (suggestion_active && original == fn_end_of_line)
     return accept_to_end(original, count, key);
 
+  dismissing = suggestion_active && original == fn_abort;
   strip_suggestion();
   restore_region_style();
-  result = original(count, key);
-  if (!rl_done)
+  if (dismissing)
+    dismiss_current_line();
+
+  navigating_history = is_history_navigation(original);
+  result = call_original(original, count, key);
+  if (navigating_history)
+    remember_history_navigation();
+  else
+    finish_non_history_command();
+
+  if (rl_done) {
+    clear_dismissed_line();
+    clear_history_navigation();
+  } else {
     refresh_suggestion();
+  }
   return result;
 }
 
@@ -353,10 +473,25 @@ static int enable_plugin(void) {
     return EXECUTION_SUCCESS;
 
   save_region_style();
+  fn_abort = rl_named_function("abort");
+  fn_beginning_of_history = rl_named_function("beginning-of-history");
+  fn_digit_argument = rl_named_function("digit-argument");
+  fn_end_of_history = rl_named_function("end-of-history");
   fn_forward_char = rl_named_function("forward-char");
   fn_forward_word = rl_named_function("forward-word");
+  fn_history_search_backward =
+      rl_named_function("history-search-backward");
+  fn_history_search_forward = rl_named_function("history-search-forward");
+  fn_history_substring_search_backward =
+      rl_named_function("history-substring-search-backward");
+  fn_history_substring_search_forward =
+      rl_named_function("history-substring-search-forward");
+  fn_next_history = rl_named_function("next-history");
+  fn_previous_history = rl_named_function("previous-history");
   fn_shell_forward_word = rl_named_function("shell-forward-word");
   fn_end_of_line = rl_named_function("end-of-line");
+  fn_vi_arg_digit = rl_named_function("vi-arg-digit");
+  last_original = rl_last_func;
 
   for (i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
     if (!wrap_keymap(roots[i])) {
@@ -373,8 +508,13 @@ static int enable_plugin(void) {
 static int disable_plugin(void) {
   suggestion_active = 0;
   rl_deactivate_mark();
+  clear_dismissed_line();
+  clear_history_navigation();
   restore_keymaps();
   free_region_style();
+  if (rl_last_func == autosuggest_dispatch)
+    rl_last_func = last_original;
+  last_original = NULL;
   plugin_enabled = 0;
   return EXECUTION_SUCCESS;
 }
@@ -457,8 +597,9 @@ int omarchy_autosuggest_builtin(WORD_LIST *list) {
 static char *omarchy_autosuggest_doc[] = {
     "Provide lightweight inline suggestions from Bash history.",
     "",
-    "The suggestion is dimmed. Right arrow accepts characters, Alt-Right/",
-    "forward-word accepts words, and End/Ctrl-E accepts the whole suggestion.",
+    "The suggestion is dimmed and italic. Right arrow accepts everything,",
+    "Alt-Right accepts a word, Ctrl-Right accepts a shell word, and Ctrl-G",
+    "dismisses the current suggestion until the command line changes.",
     "All other editing commands operate on only the text you actually typed.",
     NULL};
 
