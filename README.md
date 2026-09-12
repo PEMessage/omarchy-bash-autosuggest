@@ -243,7 +243,9 @@ make test
 interactive Bash through a pseudo-terminal. The regression suite covers
 repeated history traversal, restoring the original line, Tab cycling,
 `yank-pop`, repeated last-argument recall, suggestion acceptance, Ctrl-G
-dismissal, and history/suggestion separation.
+dismissal, history/suggestion separation, editing commands (Backspace,
+Ctrl-W, Ctrl-U) acting on the typed text rather than the ghost suffix, and
+Enter erasing the ghost before the command runs.
 
 ## License
 

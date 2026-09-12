@@ -23,7 +23,9 @@ CTRL_RIGHT = b"\x1b[1;5C"
 END = b"\x1b[F"
 TAB = b"\x09"
 CTRL_W = b"\x17"
+CTRL_U = b"\x15"
 CTRL_Y = b"\x19"
+DEL = b"\x7f"
 ALT_Y = b"\x1by"
 ALT_DOT = b"\x1b."
 PROBE = b"\x1d"
@@ -120,6 +122,18 @@ class InteractiveBash:
         match = matches[-1]
         return match.group(1).decode("utf-8"), int(match.group(2))
 
+    def accept_line(self, typed: bytes = b"", keys: bytes = b"") -> bytes:
+        os.write(self.fd, typed)
+        if typed:
+            self._drain()
+        for key in keys:
+            os.write(self.fd, bytes([key]))
+            time.sleep(0.015)
+        self._drain()
+        os.write(self.fd, b"\n")
+        time.sleep(0.05)
+        return self._read_until(b"P> ") + self._drain(0.15)
+
     def close(self) -> None:
         try:
             os.write(self.fd, b"\x03")
@@ -151,6 +165,17 @@ def check(
                 f"{name}: expected {expected!r}, got {line!r} at point {point}"
             )
         print(f"ok - {name}")
+    finally:
+        shell.close()
+
+
+def check_enter_erases_ghost(shared_object: str) -> None:
+    shell = InteractiveBash(shared_object, history=["echo GHOSTWORD"])
+    try:
+        output = shell.accept_line(b"echo G")
+        if b"GHOSTWORD" in output:
+            raise AssertionError(f"ghost survived Enter: {output!r}")
+        print("ok - Enter erases the ghost before the command runs")
     finally:
         shell.close()
 
@@ -274,6 +299,47 @@ def main() -> int:
         history=["echo short suffix", "echo short"],
         keys=UP + RIGHT,
     )
+    check(
+        "Backspace edits typed text instead of the suggestion",
+        shared_object,
+        "git ",
+        history=["git checkout main"],
+        typed=b"git c",
+        keys=DEL,
+    )
+    check(
+        "repeated Backspace keeps editing typed text",
+        shared_object,
+        "git",
+        history=["git checkout main"],
+        typed=b"git c",
+        keys=DEL * 2,
+    )
+    check(
+        "Ctrl-W edits typed text instead of the suggestion",
+        shared_object,
+        "git ",
+        history=["git checkout main"],
+        typed=b"git c",
+        keys=CTRL_W,
+    )
+    check(
+        "Ctrl-U edits typed text instead of the suggestion",
+        shared_object,
+        "",
+        history=["git checkout main"],
+        typed=b"git c",
+        keys=CTRL_U,
+    )
+    check(
+        "Right still accepts after Backspace",
+        shared_object,
+        "git checkout main",
+        history=["git checkout main"],
+        typed=b"git c",
+        keys=DEL + RIGHT,
+    )
+    check_enter_erases_ghost(shared_object)
     return 0
 
 

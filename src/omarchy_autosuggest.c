@@ -49,18 +49,21 @@ static int suggestion_start;
 static int saved_mark;
 static int saved_mark_active;
 static int style_active;
+static int tty_special_chars_disabled;
 static int history_navigation_active;
 static int history_scan_limit = 8192;
 
 static char *old_region_start;
 static char *old_region_end;
 static char *old_region_enabled;
+static char *old_bind_tty_special_chars;
 static char *dismissed_line;
 static char *history_navigation_line;
 
 static rl_command_func_t *last_original;
 
 static rl_command_func_t *fn_abort;
+static rl_command_func_t *fn_accept_line;
 static rl_command_func_t *fn_beginning_of_history;
 static rl_command_func_t *fn_digit_argument;
 static rl_command_func_t *fn_end_of_history;
@@ -220,6 +223,39 @@ static void free_region_style(void) {
   old_region_start = NULL;
   old_region_end = NULL;
   old_region_enabled = NULL;
+}
+
+/* Readline rebinds the terminal's erase/kill/word-erase characters to their
+ * default functions every time it preps the terminal for a new line
+ * (rl_prep_terminal -> _rl_bind_tty_special_chars). That silently replaces the
+ * wrappers installed above, so a suggestion would not be stripped before
+ * Backspace, Ctrl-W, or Ctrl-U. Turning the feature off for as long as the
+ * plugin is enabled keeps our wrappers in place; the terminal defaults are
+ * already present in the keymaps, so the editing behavior is unchanged. */
+static void save_tty_special_binding(void) {
+  old_bind_tty_special_chars =
+      copy_string(rl_variable_value("bind-tty-special-chars"));
+}
+
+static void disable_tty_special_binding(void) {
+  if (tty_special_chars_disabled)
+    return;
+  rl_variable_bind("bind-tty-special-chars", "off");
+  tty_special_chars_disabled = 1;
+}
+
+static void restore_tty_special_binding(void) {
+  if (!tty_special_chars_disabled)
+    return;
+  if (old_bind_tty_special_chars != NULL)
+    rl_variable_bind("bind-tty-special-chars", old_bind_tty_special_chars);
+  tty_special_chars_disabled = 0;
+}
+
+static void free_tty_special_binding(void) {
+  restore_tty_special_binding();
+  free(old_bind_tty_special_chars);
+  old_bind_tty_special_chars = NULL;
 }
 
 static void clear_dismissed_line(void) {
@@ -426,6 +462,7 @@ static int autosuggest_dispatch(int count, int key) {
   rl_command_func_t *original = find_original(map, rl_executing_key);
   int navigating_history;
   int dismissing;
+  int had_suggestion;
   int result;
 
   if (original == NULL && map != rl_binding_keymap)
@@ -441,11 +478,19 @@ static int autosuggest_dispatch(int count, int key) {
   if (suggestion_active && original == fn_end_of_line)
     return accept_to_end(original, count, key);
 
+  had_suggestion = suggestion_active;
   dismissing = suggestion_active && original == fn_abort;
   strip_suggestion();
   restore_region_style();
   if (dismissing)
     dismiss_current_line();
+
+  if (had_suggestion && original == fn_accept_line) {
+    /* Readline commits the line and prints its newline without repainting it,
+     * so the erased ghost suffix would linger in the scrollback. Repaint the
+     * stripped line first so Enter shows only what will actually run. */
+    rl_redisplay();
+  }
 
   navigating_history = is_history_navigation(original);
   result = call_original(original, count, key);
@@ -473,7 +518,9 @@ static int enable_plugin(void) {
     return EXECUTION_SUCCESS;
 
   save_region_style();
+  save_tty_special_binding();
   fn_abort = rl_named_function("abort");
+  fn_accept_line = rl_named_function("accept-line");
   fn_beginning_of_history = rl_named_function("beginning-of-history");
   fn_digit_argument = rl_named_function("digit-argument");
   fn_end_of_history = rl_named_function("end-of-history");
@@ -497,10 +544,12 @@ static int enable_plugin(void) {
     if (!wrap_keymap(roots[i])) {
       restore_keymaps();
       free_region_style();
+      free_tty_special_binding();
       fprintf(stderr, "omarchy_autosuggest: out of memory\n");
       return EXECUTION_FAILURE;
     }
   }
+  disable_tty_special_binding();
   plugin_enabled = 1;
   return EXECUTION_SUCCESS;
 }
@@ -512,6 +561,7 @@ static int disable_plugin(void) {
   clear_history_navigation();
   restore_keymaps();
   free_region_style();
+  free_tty_special_binding();
   if (rl_last_func == autosuggest_dispatch)
     rl_last_func = last_original;
   last_original = NULL;
