@@ -1,0 +1,146 @@
+name: Nightly release
+
+# Rolling nightly release.
+#
+# Unlike a versioned release, this workflow keeps a single movable tag
+# (default: `nightly`) pointed at the current default-branch HEAD and
+# overwrites the matching release every run. It only runs on demand from the
+# Actions tab (workflow_dispatch), so it never consumes CI on pushes or a
+# schedule. `ci.yml` already checks and tests every push; this job only builds
+# and publishes.
+#
+# The module is compiled inside a manylinux2014 container (CentOS 7, glibc
+# 2.17) so the resulting ".so" loads on essentially any glibc-based distro.
+# Like the project's own `omarchy-build-portable`, Readline is not linked
+# (`LDLIBS=`): the rl_* symbols are resolved from the Bash process that loads
+# the module, so the only shared-library dependency is libc.
+#
+# Bash and Readline headers come from pinned Arch Linux packages because the
+# RHEL/CentOS and Debian repositories do not ship `/usr/include/bash`. Only
+# the headers are used; nothing from those packages is linked.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to move to this commit (the matching release is overwritten)
+        required: false
+        default: nightly
+
+permissions:
+  contents: write
+
+env:
+  # Pinned header sources (see note above). The declarations this module uses
+  # are architecture independent, so x86_64 packages cover both targets.
+  BASH_HEADERS_URL: https://archive.archlinux.org/packages/b/bash/bash-5.3.15-1-x86_64.pkg.tar.zst
+  READLINE_HEADERS_URL: https://archive.archlinux.org/packages/r/readline/readline-8.3.003-1-x86_64.pkg.tar.zst
+  # Highest glibc symbol version a manylinux2014 module may reference.
+  MAX_GLIBC: "2.17"
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            platform: linux/amd64
+            image: quay.io/pypa/manylinux2014_x86_64
+          - target: aarch64-unknown-linux-gnu
+            platform: linux/arm64
+            image: quay.io/pypa/manylinux2014_aarch64
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up QEMU
+        if: matrix.platform != 'linux/amd64'
+        uses: docker/setup-qemu-action@v4
+      - name: Fetch Bash and Readline headers
+        run: |
+          set -euo pipefail
+          command -v zstd >/dev/null ||
+            { sudo apt-get update -qq; sudo apt-get install -y -qq zstd; }
+          mkdir -p .headers
+          curl -fsSL "$BASH_HEADERS_URL" | tar --zstd -x -C .headers usr/include/bash
+          curl -fsSL "$READLINE_HEADERS_URL" | tar --zstd -x -C .headers usr/include/readline
+      - name: Build portable module
+        run: |
+          set -euo pipefail
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -v "$PWD:/src" -w /src "${{ matrix.image }}" \
+            /bin/bash -euxo pipefail -c '
+              rm -rf /usr/include/bash /usr/include/readline
+              cp -a .headers/usr/include/bash /usr/include/bash
+              cp -a .headers/usr/include/readline /usr/include/readline
+              make --silent rebuild LDLIBS=
+              if command -v patchelf >/dev/null 2>&1; then
+                patchelf --remove-rpath build/omarchy_autosuggest.so
+              fi
+            '
+          sudo chown -R "$(id -u):$(id -g)" build
+      - name: Verify portability
+        run: |
+          set -euo pipefail
+          so=build/omarchy_autosuggest.so
+          echo "== dynamic section =="
+          readelf -d "$so"
+          readelf -d "$so" | grep -q 'Shared library: \[libc.so.6\]'
+          ! readelf -d "$so" | grep -Eq 'RPATH|RUNPATH'
+          ! readelf -d "$so" | grep -q 'libreadline'
+          echo "== glibc symbol versions =="
+          versions="$(objdump -T "$so" | grep -o 'GLIBC_[0-9.]*' | sed 's/^GLIBC_//' | sort -uV || true)"
+          printf '%s\n' "$versions" | sed 's/^/GLIBC_/'
+          max="$(printf '%s\n' "$versions" | tail -1)"
+          if [[ -n $max && "$(printf '%s\n%s\n' "$MAX_GLIBC" "$max" | sort -V | tail -1)" != "$MAX_GLIBC" ]]; then
+            echo "module references glibc $max (newer than $MAX_GLIBC)" >&2
+            exit 1
+          fi
+      - name: Stage module
+        run: |
+          set -euo pipefail
+          arch="${{ matrix.target }}"
+          arch="${arch%%-*}"
+          mkdir -p dist
+          cp build/omarchy_autosuggest.so "dist/omarchy_autosuggest-${arch}.so"
+          ( cd dist && sha256sum "omarchy_autosuggest-${arch}.so" > "omarchy_autosuggest-${arch}.so.sha256" )
+          ls -la dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: module-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish ${{ inputs.tag || 'nightly' }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Collect modules
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Move the tag and overwrite the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || 'nightly' }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^VERSION := //p' Makefile)"
+          short="$(git rev-parse --short HEAD)"
+
+          # Drop any previous release and its tag so the tag can move.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+          # Point the tag at the commit this run was built from.
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "$TAG (v${version})" \
+            --notes "Rolling build of v${version} at ${short} ($(date -u +%Y-%m-%d))."

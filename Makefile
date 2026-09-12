@@ -1,6 +1,6 @@
 CC ?= cc
 PYTHON ?= python
-VERSION := 0.2.0
+VERSION := 0.2.1
 BUILD_DIR := build
 MODULE := $(BUILD_DIR)/omarchy_autosuggest.so
 

@@ -48,6 +48,29 @@ less install.sh
 exec bash
 ```
 
+### Prebuilt modules
+
+Tagged releases also publish portable modules built in a `manylinux2014`
+container (glibc 2.17) for `x86_64` and `aarch64`:
+
+```
+omarchy-autosuggest-<tag>-x86_64-unknown-linux-gnu.tar.gz
+omarchy-autosuggest-<tag>-aarch64-unknown-linux-gnu.tar.gz
+```
+
+Each archive contains `omarchy_autosuggest.so` plus a `.sha256` checksum and can
+be loaded without a compiler:
+
+```bash
+tar xzf omarchy-autosuggest-*.tar.gz
+enable -f "$PWD/omarchy_autosuggest.so" omarchy_autosuggest
+omarchy_autosuggest enable
+```
+
+The source installer above remains the recommended path: the module hooks
+Readline internals, so compiling it against the host Bash and Readline is the
+most reliable option.
+
 ## Everyday controls
 
 Suggestion acceptance is deliberately simple:

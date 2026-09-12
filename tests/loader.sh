@@ -30,7 +30,7 @@ output="$(
 )"
 
 grep -Fq '__HISTCONTROL__ignoreboth:erasedups' <<<"$output"
-grep -Fq 'omarchy_autosuggest 0.2.0: enabled' <<<"$output"
+grep -Fq 'omarchy_autosuggest 0.2.1: enabled' <<<"$output"
 grep -Fq '"\C-p", "\eOA", "\e[A"' <<<"$output"
 grep -Fq '"\C-n", "\eOB", "\e[B"' <<<"$output"
 grep -Fq '"\e\e[C", "\e[1;3C", "\e[3C", "\ef"' <<<"$output"

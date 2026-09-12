@@ -22,7 +22,7 @@ output="$({
   ' bash "$module"
 } 2>&1)"
 
-grep -Fq '0.2.0' <<<"$output"
+grep -Fq '0.2.1' <<<"$output"
 grep -Fq 'enabled (history scan limit: 8192)' <<<"$output"
 grep -Fq 'disabled (history scan limit: 4096)' <<<"$output"
 
