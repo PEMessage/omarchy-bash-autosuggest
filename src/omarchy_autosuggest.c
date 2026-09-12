@@ -335,12 +335,21 @@ static const char *find_history_match(const char *prefix, size_t prefix_length) 
 
   for (i = history_length - 1; i >= first; --i) {
     const char *line = entries[i] == NULL ? NULL : entries[i]->line;
-    if (line == NULL || strchr(line, '\n') != NULL ||
-        strchr(line, '\r') != NULL)
+
+    if (line == NULL || strncmp(line, prefix, prefix_length) != 0)
       continue;
-    if (strncmp(line, prefix, prefix_length) == 0 &&
-        line[prefix_length] != '\0')
-      return line;
+
+    /* Like zsh-autosuggestions, use the newest matching history entry and do
+     * not fall back to older ones. When that entry is exactly the text already
+     * typed there is nothing left to suggest, so typing "ls" stays quiet until
+     * a space turns the prefix into "ls " and the older "ls .." can match.
+     * Entries that cannot be rendered (embedded newlines) are treated the same
+     * way: the newest match wins, it is just not shown. */
+    if (line[prefix_length] == '\0' || strchr(line, '\n') != NULL ||
+        strchr(line, '\r') != NULL)
+      return NULL;
+
+    return line;
   }
   return NULL;
 }

@@ -142,7 +142,11 @@ Suggestions are:
 
 - read directly from Bash's in-memory history;
 - matched case-sensitively against the complete text before the cursor;
-- selected newest-first;
+- selected newest-first: the most recent matching entry wins and older
+  entries are never used as a fallback;
+- hidden when that most recent match is exactly the text already typed. This
+  mirrors zsh-autosuggestions: after running `ls`, typing `ls` shows nothing,
+  while typing `ls ` lets an older `ls ..` become the suggestion;
 - displayed only when the cursor is at the end of a non-empty command;
 - hidden while browsing history;
 - omitted for multiline history entries;

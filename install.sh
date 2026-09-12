@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 readonly PROJECT_NAME="omarchy-bash-autosuggest"
-readonly REPO_URL="${OMARCHY_BASH_AUTOSUGGEST_REPO_URL:-https://github.com/cyppe/omarchy-bash-autosuggest.git}"
+readonly REPO_URL="${OMARCHY_BASH_AUTOSUGGEST_REPO_URL:-https://github.com/PEMessage/omarchy-bash-autosuggest.git}"
 readonly REPO_REF="${OMARCHY_BASH_AUTOSUGGEST_REF:-main}"
 readonly DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 readonly INSTALL_DIR="${OMARCHY_BASH_AUTOSUGGEST_INSTALL_DIR:-$DATA_HOME/$PROJECT_NAME}"

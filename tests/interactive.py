@@ -300,6 +300,30 @@ def main() -> int:
         keys=UP + RIGHT,
     )
     check(
+        "exact newest match suppresses an older suggestion",
+        shared_object,
+        "ls",
+        history=["ls ..", "ls"],
+        typed=b"ls",
+        keys=RIGHT,
+    )
+    check(
+        "typing past the exact match revives the older suggestion",
+        shared_object,
+        "ls ..",
+        history=["ls ..", "ls"],
+        typed=b"ls ",
+        keys=RIGHT,
+    )
+    check(
+        "a newer longer match is still suggested",
+        shared_object,
+        "ls ..",
+        history=["ls", "ls .."],
+        typed=b"ls",
+        keys=RIGHT,
+    )
+    check(
         "Backspace edits typed text instead of the suggestion",
         shared_object,
         "git ",
