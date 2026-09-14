@@ -30,6 +30,51 @@
 #define OMARCHY_AUTOSUGGEST_VERSION "development"
 #endif
 
+/* Ghost text is drawn with Readline's active-mark region, a feature added in
+ * Readline 8.1. These four entry points are therefore unavailable on older
+ * Readline (for example the Readline 7.0 embedded in Ubuntu 18.04's Bash),
+ * where an ordinary reference would abort the shell with "undefined symbol".
+ * Declaring them weak lets the module load anyway: the loader binds a missing
+ * weak symbol to NULL instead of failing, and enable_plugin() turns into a
+ * no-op when the feature is absent (status reports it). */
+extern void rl_activate_mark(void) __attribute__((weak));
+extern void rl_deactivate_mark(void) __attribute__((weak));
+extern void rl_keep_mark_active(void) __attribute__((weak));
+extern int rl_mark_active_p(void) __attribute__((weak));
+
+/* Present in every Readline this module can talk to; used only to report the
+ * host version when the active-mark feature is missing. Weak for the same
+ * reason as the functions above. */
+extern int rl_readline_version __attribute__((weak));
+
+static int active_mark_available(void) {
+  return rl_activate_mark != NULL && rl_deactivate_mark != NULL &&
+         rl_keep_mark_active != NULL && rl_mark_active_p != NULL;
+}
+
+static int host_readline_version(void) {
+  return &rl_readline_version != NULL ? rl_readline_version : 0;
+}
+
+static void suggestion_activate_mark(void) {
+  if (rl_activate_mark != NULL)
+    rl_activate_mark();
+}
+
+static void suggestion_deactivate_mark(void) {
+  if (rl_deactivate_mark != NULL)
+    rl_deactivate_mark();
+}
+
+static void suggestion_keep_mark_active(void) {
+  if (rl_keep_mark_active != NULL)
+    rl_keep_mark_active();
+}
+
+static int suggestion_mark_active_p(void) {
+  return rl_mark_active_p != NULL ? rl_mark_active_p() : 0;
+}
+
 typedef struct {
   Keymap map;
   int key;
@@ -313,9 +358,9 @@ static void strip_suggestion(void) {
   rl_point = typed_length;
   rl_mark = saved_mark <= typed_length ? saved_mark : typed_length;
   if (saved_mark_active)
-    rl_activate_mark();
+    suggestion_activate_mark();
   else
-    rl_deactivate_mark();
+    suggestion_deactivate_mark();
   suggestion_active = 0;
 }
 
@@ -406,7 +451,7 @@ static int refresh_suggestion(void) {
   }
 
   old_mark = rl_mark;
-  old_active = rl_mark_active_p();
+  old_active = suggestion_mark_active_p();
   rl_replace_line(match, 0);
   free(trimmed);
   rl_point = (int)prefix_length;
@@ -417,8 +462,8 @@ static int refresh_suggestion(void) {
 
   use_suggestion_style();
   rl_mark = rl_end;
-  rl_activate_mark();
-  rl_keep_mark_active();
+  suggestion_activate_mark();
+  suggestion_keep_mark_active();
   return 1;
 }
 
@@ -465,14 +510,14 @@ static int accept_forward(rl_command_func_t *original, int count, int key) {
   if (rl_point >= rl_end) {
     suggestion_active = 0;
     rl_mark = rl_point;
-    rl_deactivate_mark();
+    suggestion_deactivate_mark();
     restore_region_style();
   } else {
     suggestion_start = rl_point;
     use_suggestion_style();
     rl_mark = rl_end;
-    rl_activate_mark();
-    rl_keep_mark_active();
+    suggestion_activate_mark();
+    suggestion_keep_mark_active();
   }
   return result;
 }
@@ -482,7 +527,7 @@ static int accept_all(rl_command_func_t *original) {
   rl_point = rl_end;
   suggestion_active = 0;
   rl_mark = rl_point;
-  rl_deactivate_mark();
+  suggestion_deactivate_mark();
   restore_region_style();
   return 0;
 }
@@ -492,7 +537,7 @@ static int accept_to_end(rl_command_func_t *original, int count, int key) {
 
   suggestion_active = 0;
   rl_mark = rl_point;
-  rl_deactivate_mark();
+  suggestion_deactivate_mark();
   restore_region_style();
   return result;
 }
@@ -558,6 +603,12 @@ static int enable_plugin(void) {
   if (plugin_enabled)
     return EXECUTION_SUCCESS;
 
+  /* Readline 8.1's active-mark region is what draws the ghost text, so on
+   * older Readline there is nothing to install: stay a silent no-op and let
+   * `status` explain why suggestions are unavailable. */
+  if (!active_mark_available())
+    return EXECUTION_SUCCESS;
+
   save_region_style();
   save_tty_special_binding();
   fn_abort = rl_named_function("abort");
@@ -596,8 +647,13 @@ static int enable_plugin(void) {
 }
 
 static int disable_plugin(void) {
+  /* enable() is a no-op without Readline's active-mark API, so there is
+   * nothing to tear down in that case either. */
+  if (!active_mark_available())
+    return EXECUTION_SUCCESS;
+
   suggestion_active = 0;
-  rl_deactivate_mark();
+  suggestion_deactivate_mark();
   clear_dismissed_line();
   clear_history_navigation();
   restore_keymaps();
@@ -633,6 +689,22 @@ static int set_history_limit(const char *text) {
   }
   history_scan_limit = (int)value;
   return EXECUTION_SUCCESS;
+}
+
+static void print_status(void) {
+  int version;
+
+  printf("omarchy_autosuggest %s: %s", OMARCHY_AUTOSUGGEST_VERSION,
+         plugin_enabled ? "enabled" : "disabled");
+  if (!active_mark_available()) {
+    version = host_readline_version();
+    printf(" (Readline 8.1 or newer required for suggestions");
+    if (version != 0)
+      printf("; this shell provides Readline %d.%d", (version >> 8) & 0xff,
+             version & 0xff);
+    printf(")");
+  }
+  printf(" (history scan limit: %d)\n", history_scan_limit);
 }
 
 int omarchy_autosuggest_builtin(WORD_LIST *list) {
@@ -673,9 +745,7 @@ int omarchy_autosuggest_builtin(WORD_LIST *list) {
   }
   if (strcmp(command, "status") == 0 &&
       (list == NULL || list->next == NULL)) {
-    printf("omarchy_autosuggest %s: %s (history scan limit: %d)\n",
-           OMARCHY_AUTOSUGGEST_VERSION,
-           plugin_enabled ? "enabled" : "disabled", history_scan_limit);
+    print_status();
     return EXECUTION_SUCCESS;
   }
 

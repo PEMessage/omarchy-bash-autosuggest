@@ -71,6 +71,13 @@ The source installer above remains the recommended path: the module hooks
 Readline internals, so compiling it against the host Bash and Readline is the
 most reliable option.
 
+Both paths need Bash 5 and Readline 8.1 or newer: the faint ghost text is drawn
+with Readline's "active region", a feature introduced in 8.1. On an older
+Readline — for example the Readline 7.0 embedded in Ubuntu 18.04's Bash — the
+module still loads and `enable` quietly does nothing; `omarchy_autosuggest
+status` reports the requirement and suggestions stay off, instead of aborting
+the shell with a symbol error.
+
 ## Everyday controls
 
 Suggestion acceptance is deliberately simple:

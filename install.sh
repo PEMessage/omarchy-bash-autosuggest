@@ -76,6 +76,17 @@ installed_version="$(
   ' bash "$INSTALL_DIR/build/omarchy_autosuggest.so"
 )" || die "the built module could not be loaded"
 
+# Ghost text needs Readline 8.1 (the active-region API). Older Readline still
+# loads the module, but suggestions cannot be drawn, so warn instead of letting
+# the user discover it on the next shell.
+if bash --noprofile --norc -c '
+      enable -f "$1" omarchy_autosuggest
+      omarchy_autosuggest status
+    ' bash "$INSTALL_DIR/build/omarchy_autosuggest.so" 2>/dev/null |
+    grep -Fq 'Readline 8.1 or newer required'; then
+  printf 'omarchy-bash-autosuggest: Readline 8.1 or newer is required; suggestions will stay disabled\n' >&2
+fi
+
 mkdir -p "$(dirname "$BASHRC")"
 touch "$BASHRC"
 
