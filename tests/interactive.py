@@ -277,6 +277,30 @@ def main() -> int:
         keys=END,
     )
     check(
+        "Right trims trailing spaces from the suggestion",
+        shared_object,
+        "git checkout main",
+        history=["git checkout main   "],
+        typed=b"git c",
+        keys=RIGHT,
+    )
+    check(
+        "Ctrl-F trims trailing tabs from the suggestion",
+        shared_object,
+        "git checkout main",
+        history=["git checkout main\t\t"],
+        typed=b"git c",
+        keys=CTRL_F,
+    )
+    check(
+        "a prefix padded with trailing spaces stays quiet",
+        shared_object,
+        "ls",
+        history=["ls   "],
+        typed=b"ls",
+        keys=RIGHT,
+    )
+    check(
         "Ctrl-G dismisses the current suggestion",
         shared_object,
         "e",

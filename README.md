@@ -147,6 +147,8 @@ Suggestions are:
 - hidden when that most recent match is exactly the text already typed. This
   mirrors zsh-autosuggestions: after running `ls`, typing `ls` shows nothing,
   while typing `ls ` lets an older `ls ..` become the suggestion;
+- stripped of trailing whitespace, so accepting a suggestion never appends
+  stray blanks to the line or to the next history entry;
 - displayed only when the cursor is at the end of a non-empty command;
 - hidden while browsing history;
 - omitted for multiline history entries;

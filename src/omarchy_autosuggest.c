@@ -10,6 +10,7 @@
  * There is no daemon, database, network access, or per-key subprocess.
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <setjmp.h>
@@ -318,7 +319,17 @@ static void strip_suggestion(void) {
   suggestion_active = 0;
 }
 
-static const char *find_history_match(const char *prefix, size_t prefix_length) {
+/* Trailing whitespace is never meaningful in a suggestion: it only makes the
+ * accepted line grow stray blanks that Bash then stores in history. Drop it so
+ * that accepting a suggestion yields the command as it was actually written. */
+static size_t trimmed_length(const char *line, size_t length) {
+  while (length > 0 && isspace((unsigned char)line[length - 1]))
+    --length;
+  return length;
+}
+
+static const char *find_history_match(const char *prefix, size_t prefix_length,
+                                      size_t *match_length) {
   HIST_ENTRY **entries;
   int first;
   int i;
@@ -335,6 +346,7 @@ static const char *find_history_match(const char *prefix, size_t prefix_length) 
 
   for (i = history_length - 1; i >= first; --i) {
     const char *line = entries[i] == NULL ? NULL : entries[i]->line;
+    size_t length;
 
     if (line == NULL || strncmp(line, prefix, prefix_length) != 0)
       continue;
@@ -345,10 +357,14 @@ static const char *find_history_match(const char *prefix, size_t prefix_length) 
      * a space turns the prefix into "ls " and the older "ls .." can match.
      * Entries that cannot be rendered (embedded newlines) are treated the same
      * way: the newest match wins, it is just not shown. */
-    if (line[prefix_length] == '\0' || strchr(line, '\n') != NULL ||
-        strchr(line, '\r') != NULL)
+    if (strchr(line, '\n') != NULL || strchr(line, '\r') != NULL)
       return NULL;
 
+    length = trimmed_length(line, strlen(line));
+    if (length <= prefix_length)
+      return NULL;
+
+    *match_length = length;
     return line;
   }
   return NULL;
@@ -356,7 +372,9 @@ static const char *find_history_match(const char *prefix, size_t prefix_length) 
 
 static int refresh_suggestion(void) {
   const char *match;
+  char *trimmed = NULL;
   size_t prefix_length;
+  size_t match_length;
   int old_mark;
   int old_active;
 
@@ -368,15 +386,29 @@ static int refresh_suggestion(void) {
   }
 
   prefix_length = (size_t)rl_end;
-  match = find_history_match(rl_line_buffer, prefix_length);
+  match = find_history_match(rl_line_buffer, prefix_length, &match_length);
   if (match == NULL) {
     restore_region_style();
     return 0;
   }
 
+  /* Hand Readline a trailing-whitespace-free copy when the history entry has
+   * some, so ghost text and the accepted command stay clean. */
+  if (match[match_length] != '\0') {
+    trimmed = malloc(match_length + 1);
+    if (trimmed == NULL) {
+      restore_region_style();
+      return 0;
+    }
+    memcpy(trimmed, match, match_length);
+    trimmed[match_length] = '\0';
+    match = trimmed;
+  }
+
   old_mark = rl_mark;
   old_active = rl_mark_active_p();
   rl_replace_line(match, 0);
+  free(trimmed);
   rl_point = (int)prefix_length;
   suggestion_start = rl_point;
   saved_mark = old_mark;
